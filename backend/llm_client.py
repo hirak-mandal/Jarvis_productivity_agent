@@ -3,7 +3,7 @@ import asyncio
 from groq import AsyncGroq
 from dotenv import load_dotenv
 
-async def main():
+async def get_jarvis_stream(user_prompt:str):
     load_dotenv()
     api_key=os.getenv("GROQ_API_KEY")
     if not api_key:
@@ -11,8 +11,10 @@ async def main():
     client=AsyncGroq(api_key=api_key)
     stream=await client.chat.completions.create(
         messages=[
-            "role":"user",
-            "content":"You are a helpful assistant."
+            {
+                "role":"user",
+                "content":user_prompt
+            }
         ],
         model="llama-3.3-70b-versatile",
         temperature=0.5,
@@ -23,6 +25,8 @@ async def main():
     )    
 
     async for chunk in stream:
-        print(chunk.choices[0].delta.content,end=" ")
+        token=chunk.choices[0].delta.content or ""
+        if token:
+            yield token
 
-asyncio.run(main())
+asyncio.run(get_jarvis_stream())

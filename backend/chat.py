@@ -1,5 +1,6 @@
 from fastapi import APIRouter,WebSocket,WebSocketDisconnect
 from pydantic import BaseModel
+from backend.llm_client import get_jarvis_stream
 #prefix--> \chat\send or \chat\history
 #don't need to add \chat everytime prefix does it for every url
 #tag--> creates a section in API documentation for cleaner structure
@@ -41,9 +42,13 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
     try:
         while True:
             # 1. Server WAITS for the user to send a prompt
-            data= await websocket.receive_text()
+            user_data= await websocket.receive_text()
+            #function yields generated tokens to arvis_response
+            jarvis_response=get_jarvis_stream(user_data)
+            #loops through tokens 
+            for token in jarvis_response:
             #send response back token by token 
-            await manager.send_personal_message(f"You wrote: {data}", websocket)
+                await manager.send_personal_message(token, websocket)
             await manager.broadcast(f"Client #{client_id} says: {data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
