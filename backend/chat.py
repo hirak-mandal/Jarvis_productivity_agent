@@ -45,11 +45,22 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
             user_data= await websocket.receive_text()
             #function yields generated tokens to arvis_response
             jarvis_response=get_jarvis_stream(user_data)
+
+            #VOICE(sentence buffer)
+            sentence_buffer=""
             #loops through tokens 
-            for token in jarvis_response:
+            async for token in jarvis_response:
             #send response back token by token 
                 await manager.send_personal_message(token, websocket)
-            await manager.broadcast(f"Client #{client_id} says: {data}")
+                #joining the tokens to make a sentence
+                sentence_buffer+=token
+                #Check if the buffer now holds a complete sentence
+                if any(puntuation in token for puntuation in [".","!","?"]):
+                    #Pass the full sentence to voice generator task
+                    await generate_voice_response(sentence_buffer)
+                    # Clear the dock for the next sentence
+                    sentence_buffer=""
+            await manager.broadcast(f"Client #{client_id} says: {user_data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
         await manager.broadcast(f"Client #{client_id} left the chat")
