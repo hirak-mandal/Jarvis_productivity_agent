@@ -1,6 +1,7 @@
 from fastapi import APIRouter,WebSocket,WebSocketDisconnect
 from pydantic import BaseModel
 from backend.llm_client import get_jarvis_stream
+from backend.voice import stream_tokens_to_cartesia_voice
 #prefix--> \chat\send or \chat\history
 #don't need to add \chat everytime prefix does it for every url
 #tag--> creates a section in API documentation for cleaner structure
@@ -45,21 +46,19 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
             user_data= await websocket.receive_text()
             #function yields generated tokens to arvis_response
             jarvis_response=get_jarvis_stream(user_data)
+            
+            # --- THE MAGIC HANDOFF ---
+            # Pass the active generator directly to Cartesia. 
+            # While this runs, it handles text tokens and pulls down the complete voice payload.
+            audio_payload = await stream_tokens_to_cartesia_voice(jarvis_response)
 
-            #VOICE(sentence buffer)
-            sentence_buffer=""
-            #loops through tokens 
-            async for token in jarvis_response:
+            # Send the final compiled voice payload across the open frontend pipe
+            if audio_payload:
+                await websocket.send_bytes(audio_payload)
+                
             #send response back token by token 
-                await manager.send_personal_message(token, websocket)
-                #joining the tokens to make a sentence
-                sentence_buffer+=token
-                #Check if the buffer now holds a complete sentence
-                if any(puntuation in token for puntuation in [".","!","?"]):
-                    #Pass the full sentence to voice generator task
-                    await generate_voice_response(sentence_buffer)
-                    # Clear the dock for the next sentence
-                    sentence_buffer=""
+            for token in jarvis_response:
+                    await manager.send_personal_message(token, websocket)
             await manager.broadcast(f"Client #{client_id} says: {user_data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
