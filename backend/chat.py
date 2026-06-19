@@ -1,7 +1,9 @@
 from fastapi import APIRouter,WebSocket,WebSocketDisconnect
 from pydantic import BaseModel
 from backend.llm_client import get_jarvis_stream
-from backend.voice import stream_tokens_to_cartesia_voice
+from backend.voice import collect_cartesia_audio
+from cartesia import AsyncCartesia
+import os
 #prefix--> \chat\send or \chat\history
 #don't need to add \chat everytime prefix does it for every url
 #tag--> creates a section in API documentation for cleaner structure
@@ -40,25 +42,44 @@ manager=ConnectionManager()  #instance server
 @chat_router.websocket("/stream")
 async def handle_chat_system(websocket: WebSocket,client_id:int):
     await manager.connect(websocket) #connection on
+
+    #Initialize Cartesia client here so the websocket stays open during the chat session
+    cartesia_api_key = os.getenv("CARTESIA_API_KEY", "PLACEHOLDER_UNTIL_ENV")
+    cartesia_client = AsyncCartesia(api_key=cartesia_api_key)
+
     try:
         while True:
             # 1. Server WAITS for the user to send a prompt
             user_data= await websocket.receive_text()
             #function yields generated tokens to arvis_response
             jarvis_response=get_jarvis_stream(user_data)
-            
-            # --- THE MAGIC HANDOFF ---
-            # Pass the active generator directly to Cartesia. 
-            # While this runs, it handles text tokens and pulls down the complete voice payload.
-            audio_payload = await stream_tokens_to_cartesia_voice(jarvis_response)
 
-            # Send the final compiled voice payload across the open frontend pipe
-            if audio_payload:
-                await websocket.send_bytes(audio_payload)
+            # Open the streaming pipe to Cartesia
+            async with cartesia_client.tts.websocket_connect() as ws:
+                ctx = ws.context(
+                    model_id="sonic-latest", # Fixed underline string issue
+                    voice={"mode": "id", "id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b"},
+                    output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 44100}
+                )
                 
-            #send response back token by token 
-            for token in jarvis_response:
+                # --- SINGLE UNIFIED LOOP ---
+                # Fixes both Bug 1 and Bug 2 by reading the token once!
+                async for token in jarvis_response:
+                    # Send text to client UI instantly
                     await manager.send_personal_message(token, websocket)
+                    # Push text to Cartesia voice engine simultaneously
+                    await ctx.push(transcript=token, continue_=True)
+                
+                # Sign off inputs to finalize generation
+                await ctx.push(transcript="", continue_=False)
+                
+                # Collect the compiled audio bytes from the RAM utility
+                audio_payload = await collect_cartesia_audio(ctx)
+            
+                # Send the final compiled voice payload across the open frontend pipe
+                if audio_payload:
+                    await websocket.send_bytes(audio_payload)
+            
             await manager.broadcast(f"Client #{client_id} says: {user_data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
