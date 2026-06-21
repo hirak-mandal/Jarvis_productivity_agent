@@ -1,6 +1,6 @@
 import os
-import asyncio
 from groq import AsyncGroq
+from backend.system_prompt import system_prompt
 from dotenv import load_dotenv
 
 # Load environment and set up client ONCE at startup
@@ -15,13 +15,17 @@ async def get_jarvis_stream(user_prompt:str):
     stream=await client.chat.completions.create(
         messages=[
             {
+                "role":"system",
+                "content":system_prompt
+            },
+            {
                 "role":"user",
                 "content":user_prompt
             }
         ],
         model="llama-3.3-70b-versatile",
-        temperature=0.5,
-        max_completion_tokens=1024,
+        temperature=0.4,
+        max_completion_tokens=512,
         top_p=1,
         stop=None,
         stream=True
