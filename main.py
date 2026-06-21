@@ -1,3 +1,4 @@
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.chat import chat_router
@@ -23,3 +24,12 @@ app.add_middleware(
 
 #sub-commands(routers) into the central hub
 app.include_router(chat_router)
+
+#Root health check endpoint
+@app.get("/")
+def home():
+    return {"status":"online","Agent":"Jarvis"}
+
+if __name__=="__main__":
+    #run the ASGI server locally on port 8000
+    uvicorn.run("main.py:app",host="127.0.0.1",port=8000,reload=True)
