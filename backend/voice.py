@@ -24,18 +24,14 @@ async def transcribe_audio(raw_audio_bites:bytes)-> None:
 
 #TTS(Test-To-Speech) --> used Cartesia
 """Async streaming multiple transcripts with continuations."""
-async def collect_cartesia_audio(ctx)-> bytes:
-    # RAM bucket to collect Cartesia's sound replies
-    audio_accumulator = io.BytesIO()
+async def stream_cartesia_audio(ctx):
+    """Yields audio chunks in real-time as they arrive from Cartesia."""
     
     # 3. CATCH CARTESIA'S SPEECH PACKETS INTO RAM
     async for response in ctx.receive():
         if response.type == "chunk" and response.audio:
-            audio_accumulator.write(response.audio)
+            yield response.audio  # Stream chunks immediately instead of writing to a buffer
         elif response.type == "error":
             print(f"Cartesia Error: {response.message}")
                 
-    # Rewind our RAM bucket and return the whole completed asset to chat.py
-    audio_accumulator.seek(0)
-    return audio_accumulator.read()
     

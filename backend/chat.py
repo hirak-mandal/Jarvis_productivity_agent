@@ -1,7 +1,8 @@
+import asyncio
 from fastapi import APIRouter,WebSocket,WebSocketDisconnect
 from pydantic import BaseModel
 from backend.llm_client import get_jarvis_stream
-from backend.voice import collect_cartesia_audio
+from backend.voice import stream_cartesia_audio
 from cartesia import AsyncCartesia
 import os
 #prefix--> \chat\send or \chat\history
@@ -52,7 +53,7 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
             # 1. Server WAITS for the user to send a prompt
             user_data= await websocket.receive_text()
             #function yields generated tokens to arvis_response
-            jarvis_response=get_jarvis_stream(user_data)
+            jarvis_response= await get_jarvis_stream(user_data)
 
             # Open the streaming pipe to Cartesia
             async with cartesia_client.tts.websocket_connect() as ws:
@@ -62,24 +63,28 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
                     output_format={"container": "raw", "encoding": "pcm_s16le", "sample_rate": 44100}
                 )
                 
-                # --- SINGLE UNIFIED LOOP ---
-                # Fixes both Bug 1 and Bug 2 by reading the token once!
-                async for token in jarvis_response:
-                    # Send text to client UI instantly
-                    await manager.send_personal_message(token, websocket)
-                    # Push text to Cartesia voice engine simultaneously
-                    await ctx.push(transcript=token, continue_=True)
-                
-                # Sign off inputs to finalize generation
-                await ctx.push(transcript="", continue_=False)
-                
-                # Collect the compiled audio bytes from the RAM utility
-                audio_payload = await collect_cartesia_audio(ctx)
-            
-                # Send the final compiled voice payload across the open frontend pipe
-                if audio_payload:
-                    await websocket.send_bytes(audio_payload)
-            
+                # --- TASK 1: Handle Incoming Groq Text -> Send to Frontend & Cartesia ---
+                async def text_to_cartesia_task():
+                    async for token in jarvis_response:
+                        # Send text to client UI instantly
+                        await manager.send_personal_message(token, websocket)
+                        # Push text to Cartesia voice engine simultaneously
+                        await ctx.push(transcript=token, continue_=True)
+                    # Close Cartesia context inputs when Groq text runs out
+                    await ctx.push(transcript="", continue_=False)
+
+                # --- TASK 2: Handle Incoming Cartesia Audio -> Send straight to Frontend ---
+                async def audio_to_frontend_task():
+                        async for audio_chunk in stream_cartesia_audio(ctx):
+                            # Send raw audio binary chunk to frontend instantly!
+                            await websocket.send_bytes(audio_chunk)
+
+                # Fire BOTH tasks concurrently. The audio starts playing while text is still generating!
+                await asyncio.gather(
+                    text_to_cartesia_task(),
+                    audio_to_frontend_task()
+                )
+
             await manager.broadcast(f"Client #{client_id} says: {user_data}")
     except WebSocketDisconnect:
         manager.disconnect(websocket)
