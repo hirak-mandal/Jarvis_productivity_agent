@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from backend.llm_client import get_jarvis_stream
 from backend.voice import stream_cartesia_audio
 from cartesia import AsyncCartesia
+from data.database import process_user_input
 import os
 #prefix--> \chat\send or \chat\history
 #don't need to add \chat everytime prefix does it for every url
@@ -52,6 +53,7 @@ async def handle_chat_system(websocket: WebSocket,client_id:int):
         while True:
             # 1. Server WAITS for the user to send a prompt
             user_data= await websocket.receive_text()
+            await process_user_input(user_data) #for processing user input and saving tasks/reminders to the database
             #function yields generated tokens to arvis_response
             jarvis_response= await get_jarvis_stream(user_data)
 
