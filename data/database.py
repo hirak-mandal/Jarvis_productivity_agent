@@ -33,3 +33,12 @@ async def process_user_input(user_data:str):
 
     if intent in ["create_task","create_reminder"]:
         await save_task_remainder(data)
+
+def get_pending_reminders():
+    con=sqlite3.connect("jarvis.db")
+    cur=con.cursor()
+    cur.execute("SELECT * from Tasks WHERE Status='pending'")
+    results=con.fetchall()
+    con.commit()
+    con.close()
+    return results
